@@ -416,7 +416,8 @@ print_insn_args (const char *d, insn_t l, bfd_vma pc, disassemble_info *info)
    this is little-endian code.  */
 
 static int
-riscv_disassemble_insn (bfd_vma memaddr, insn_t word, disassemble_info *info)
+riscv_disassemble_insn (bfd_vma memaddr, insn_t word, disassemble_info *info,
+			int bigendian)
 {
   const struct riscv_opcode *op;
   static bfd_boolean init = 0;
@@ -455,8 +456,7 @@ riscv_disassemble_insn (bfd_vma memaddr, insn_t word, disassemble_info *info)
 
   insnlen = riscv_insn_length (word);
 
-  /* RISC-V instructions are always little-endian.  */
-  info->endian_code = BFD_ENDIAN_LITTLE;
+  info->endian_code = (bigendian? BFD_ENDIAN_BIG : BFD_ENDIAN_LITTLE);
 
   info->bytes_per_chunk = insnlen % 4 == 0 ? 4 : 2;
   info->bytes_per_line = 8;
@@ -546,8 +546,8 @@ riscv_disassemble_insn (bfd_vma memaddr, insn_t word, disassemble_info *info)
   return insnlen;
 }
 
-int
-print_insn_riscv (bfd_vma memaddr, struct disassemble_info *info)
+static int
+print_insn_riscv (bfd_vma memaddr, struct disassemble_info *info, int bigendian)
 {
   bfd_byte packet[2];
   insn_t insn = 0;
@@ -576,10 +576,22 @@ print_insn_riscv (bfd_vma memaddr, struct disassemble_info *info)
 	  return status;
 	}
 
-      insn |= ((insn_t) bfd_getl16 (packet)) << (8 * n);
+      insn |= ((insn_t) (bigendian? bfd_getb16 (packet) : bfd_getl16 (packet))) << (8 * n);
     }
 
-  return riscv_disassemble_insn (memaddr, insn, info);
+  return riscv_disassemble_insn (memaddr, insn, info, bigendian);
+}
+
+int
+print_insn_big_riscv (bfd_vma memaddr, struct disassemble_info *info)
+{
+  return print_insn_riscv (memaddr, info, 1);
+}
+
+int
+print_insn_little_riscv (bfd_vma memaddr, struct disassemble_info *info)
+{
+  return print_insn_riscv (memaddr, info, 0);
 }
 
 /* Prevent use of the fake labels that are generated as part of the DWARF

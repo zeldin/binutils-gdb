@@ -397,7 +397,10 @@ static char *expr_end;
 const char *
 riscv_target_format (void)
 {
-  return xlen == 64 ? "elf64-littleriscv" : "elf32-littleriscv";
+  if (target_big_endian)
+    return xlen == 64 ? "elf64-bigriscv" : "elf32-bigriscv";
+  else
+    return xlen == 64 ? "elf64-littleriscv" : "elf32-littleriscv";
 }
 
 /* Return the length of instruction INSN.  */
@@ -426,7 +429,16 @@ static void
 install_insn (const struct riscv_cl_insn *insn)
 {
   char *f = insn->frag->fr_literal + insn->where;
-  md_number_to_chars (f, insn->insn_opcode, insn_length (insn));
+  unsigned int length = insn_length (insn);
+  valueT opcode = insn->insn_opcode;
+  /* The least significant parcel is always stored first,
+     regardless of endianness */
+  while (length >= 2) {
+    md_number_to_chars (f, opcode, 2);
+    opcode >>= 16;
+    f += 2;
+    length -= 2;
+  }
 }
 
 /* Move INSN to offset WHERE in FRAG.  Adjust the fixups accordingly
@@ -2596,7 +2608,10 @@ md_atof (int type, char *litP, int *sizeP)
 void
 md_number_to_chars (char *buf, valueT val, int n)
 {
-  number_to_chars_littleendian (buf, val, n);
+  if (target_big_endian)
+    number_to_chars_bigendian (buf, val, n);
+  else
+    number_to_chars_littleendian (buf, val, n);
 }
 
 const char *md_shortopts = "O::g::G:";
@@ -2615,6 +2630,8 @@ enum options
   OPTION_NO_CSR_CHECK,
   OPTION_MISA_SPEC,
   OPTION_MPRIV_SPEC,
+  OPTION_BIG_ENDIAN,
+  OPTION_LITTLE_ENDIAN,
   OPTION_END_OF_ENUM
 };
 
@@ -2633,6 +2650,8 @@ struct option md_longopts[] =
   {"mno-csr-check", no_argument, NULL, OPTION_NO_CSR_CHECK},
   {"misa-spec", required_argument, NULL, OPTION_MISA_SPEC},
   {"mpriv-spec", required_argument, NULL, OPTION_MPRIV_SPEC},
+  {"mbig-endian", no_argument, NULL, OPTION_BIG_ENDIAN},
+  {"mlittle-endian", no_argument, NULL, OPTION_LITTLE_ENDIAN},
 
   {NULL, no_argument, NULL, 0}
 };
@@ -2726,6 +2745,14 @@ md_parse_option (int c, const char *arg)
 
     case OPTION_MPRIV_SPEC:
       return riscv_set_default_priv_spec (arg);
+
+    case OPTION_BIG_ENDIAN:
+      target_big_endian = 1;
+      break;
+
+    case OPTION_LITTLE_ENDIAN:
+      target_big_endian = 0;
+      break;
 
     default:
       return 0;
