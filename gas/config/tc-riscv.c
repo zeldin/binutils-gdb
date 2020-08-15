@@ -403,6 +403,48 @@ riscv_target_format (void)
     return xlen == 64 ? "elf64-littleriscv" : "elf32-littleriscv";
 }
 
+/* Read a 16-bit instruction */
+static bfd_vma
+riscv_geti16 (const void *p)
+{
+  if (target_big_endian)
+    return bfd_getb16 (p);
+  else
+    return bfd_getl16 (p);
+}
+
+/* Read a 32-bit instruction */
+static bfd_vma
+riscv_geti32 (const void *p)
+{
+  if (target_big_endian)
+    return bfd_getb16 (p) |
+      (bfd_getb16 (((const bfd_byte *)p) + 2) << 16);
+  else
+    return bfd_getl32 (p);
+}
+
+/* Write a 16-bit instruction */
+static void
+riscv_puti16 (bfd_vma data, void *p)
+{
+  if (target_big_endian)
+    return bfd_putb16 (data, p);
+  else
+    return bfd_putl16 (data, p);
+}
+
+/* Write a 32-bit instruction */
+static void
+riscv_puti32 (bfd_vma data, void *p)
+{
+  if (target_big_endian) {
+    bfd_putb16 (data, p);
+    bfd_putb16 (data >> 16, ((bfd_byte *)p) + 2);
+  } else
+    return bfd_putl32 (data, p);
+}
+
 /* Return the length of instruction INSN.  */
 
 static inline unsigned int
@@ -2868,8 +2910,8 @@ md_apply_fix (fixS *fixP, valueT *valP, segT seg ATTRIBUTE_UNUSED)
     case BFD_RELOC_RISCV_HI20:
     case BFD_RELOC_RISCV_LO12_I:
     case BFD_RELOC_RISCV_LO12_S:
-      bfd_putl32 (riscv_apply_const_reloc (fixP->fx_r_type, *valP)
-		  | bfd_getl32 (buf), buf);
+      riscv_puti32 (riscv_apply_const_reloc (fixP->fx_r_type, *valP)
+		    | riscv_geti32 (buf), buf);
       if (fixP->fx_addsy == NULL)
 	fixP->fx_done = TRUE;
       relaxable = TRUE;
@@ -3029,7 +3071,7 @@ md_apply_fix (fixS *fixP, valueT *valP, segT seg ATTRIBUTE_UNUSED)
 	  /* Fill in a tentative value to improve objdump readability.  */
 	  bfd_vma target = S_GET_VALUE (fixP->fx_addsy) + *valP;
 	  bfd_vma delta = target - md_pcrel_from (fixP);
-	  bfd_putl32 (bfd_getl32 (buf) | ENCODE_UJTYPE_IMM (delta), buf);
+	  riscv_puti32 (riscv_geti32 (buf) | ENCODE_UJTYPE_IMM (delta), buf);
 	}
       break;
 
@@ -3039,7 +3081,7 @@ md_apply_fix (fixS *fixP, valueT *valP, segT seg ATTRIBUTE_UNUSED)
 	  /* Fill in a tentative value to improve objdump readability.  */
 	  bfd_vma target = S_GET_VALUE (fixP->fx_addsy) + *valP;
 	  bfd_vma delta = target - md_pcrel_from (fixP);
-	  bfd_putl32 (bfd_getl32 (buf) | ENCODE_SBTYPE_IMM (delta), buf);
+	  riscv_puti32 (riscv_geti32 (buf) | ENCODE_SBTYPE_IMM (delta), buf);
 	}
       break;
 
@@ -3049,7 +3091,7 @@ md_apply_fix (fixS *fixP, valueT *valP, segT seg ATTRIBUTE_UNUSED)
 	  /* Fill in a tentative value to improve objdump readability.  */
 	  bfd_vma target = S_GET_VALUE (fixP->fx_addsy) + *valP;
 	  bfd_vma delta = target - md_pcrel_from (fixP);
-	  bfd_putl16 (bfd_getl16 (buf) | ENCODE_RVC_B_IMM (delta), buf);
+	  riscv_puti16 (riscv_geti16 (buf) | ENCODE_RVC_B_IMM (delta), buf);
 	}
       break;
 
@@ -3059,7 +3101,7 @@ md_apply_fix (fixS *fixP, valueT *valP, segT seg ATTRIBUTE_UNUSED)
 	  /* Fill in a tentative value to improve objdump readability.  */
 	  bfd_vma target = S_GET_VALUE (fixP->fx_addsy) + *valP;
 	  bfd_vma delta = target - md_pcrel_from (fixP);
-	  bfd_putl16 (bfd_getl16 (buf) | ENCODE_RVC_J_IMM (delta), buf);
+	  riscv_puti16 (riscv_geti16 (buf) | ENCODE_RVC_J_IMM (delta), buf);
 	}
       break;
 
@@ -3427,7 +3469,7 @@ md_convert_frag_branch (fragS *fragp)
 	  case 8:
 	  case 4:
 	    /* Expand the RVC branch into a RISC-V one.  */
-	    insn = bfd_getl16 (buf);
+	    insn = riscv_geti16 (buf);
 	    rs1 = 8 + ((insn >> OP_SH_CRS1S) & OP_MASK_CRS1S);
 	    if ((insn & MASK_C_J) == MATCH_C_J)
 	      insn = MATCH_JAL;
@@ -3439,15 +3481,15 @@ md_convert_frag_branch (fragS *fragp)
 	      insn = MATCH_BNE | (rs1 << OP_SH_RS1);
 	    else
 	      abort ();
-	    bfd_putl32 (insn, buf);
+	    riscv_puti32 (insn, buf);
 	    break;
 
 	  case 6:
 	    /* Invert the branch condition.  Branch over the jump.  */
-	    insn = bfd_getl16 (buf);
+	    insn = riscv_geti16 (buf);
 	    insn ^= MATCH_C_BEQZ ^ MATCH_C_BNEZ;
 	    insn |= ENCODE_RVC_B_IMM (6);
-	    bfd_putl16 (insn, buf);
+	    riscv_puti16 (insn, buf);
 	    buf += 2;
 	    goto jump;
 
@@ -3471,7 +3513,7 @@ md_convert_frag_branch (fragS *fragp)
       gas_assert (!RELAX_BRANCH_UNCOND (fragp->fr_subtype));
 
       /* Invert the branch condition.  Branch over the jump.  */
-      insn = bfd_getl32 (buf);
+      insn = riscv_geti32 (buf);
       insn ^= MATCH_BEQ ^ MATCH_BNE;
       insn |= ENCODE_SBTYPE_IMM (8);
       md_number_to_chars ((char *) buf, insn, 4);
